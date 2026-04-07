@@ -1,0 +1,39 @@
+# Local files (models, build outputs kept for personal use)
+.local/
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Models junction (points to .local/models)
+models/
+
+# llama.cpp binaries (downloaded, not source)
+bin/
+bin_exe/
+
+# Build artifacts
+build/
+dist/
+*.exe
+*.apk
+*.zip
+*.log
+*.part
+*.ico
+
+# Android build
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+android/build/
+android/local.properties
+android/app/src/main/assets/*.gguf
+android/app/src/main/assets/*.part_*
+android/app/src/main/cpp/llama.cpp/
+
+# IDE / editor
+.claude/
+.idea/
+*.iml

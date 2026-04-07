@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gemma4 LLM</string>
+    <string name="notification_channel">Gemma4 Inference</string>
+    <string name="notification_title">Gemma4 LLM</string>
+</resources>
