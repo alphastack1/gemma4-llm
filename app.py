@@ -61,13 +61,14 @@ MODELS = {
     "12B": {
         "name": "Gemma 4 12B",
         "file": "gemma-4-12b-it-UD-Q4_K_XL.gguf",
-        # Distinct local name — the 12B vision projector differs from E2B's,
-        # which also ships as "mmproj-F16.gguf" upstream (avoid a filename clash).
-        "mmproj": "mmproj-12b-F16.gguf",
+        # Use the BF16 vision projector, NOT F16: with the 12B, the F16 mmproj
+        # produces garbage (<unused49> tokens) — BF16 works correctly. Distinct
+        # local name also avoids clashing with E2B's mmproj-F16.gguf.
+        "mmproj": "mmproj-12b-BF16.gguf",
         "url": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-UD-Q4_K_XL.gguf",
-        "mmproj_url": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/mmproj-F16.gguf",
+        "mmproj_url": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/mmproj-BF16.gguf",
         "size_mb": 7025,
-        "mmproj_size_mb": 116,
+        "mmproj_size_mb": 168,
         "description": "12B dense, full multimodal. Best quality. GPU or strong CPU recommended.",
         "bundled": False,
     },
@@ -139,6 +140,8 @@ log = logging.getLogger("gemma4")
 
 llama_process = None
 active_model = None
+llama_ready = False   # True only once llama-server's /health returns 200
+                      # (large models take ~30-60s to load; chat 503s until then)
 download_progress = {}  # key -> {percent, status, error}
 last_heartbeat = 0.0
 
@@ -257,9 +260,10 @@ def download_and_extract_zip(url, dest_dir, progress_key):
 # ---------------------------------------------------------------------------
 
 def start_llama_server(model_key):
-    global llama_process, active_model
+    global llama_process, active_model, llama_ready
 
     stop_llama_server()
+    llama_ready = False
 
     exe = find_llama_server()
     if not exe:
@@ -322,6 +326,7 @@ def start_llama_server(model_key):
             try:
                 r = requests.get(f"http://127.0.0.1:{LLAMA_SERVER_PORT}/health", timeout=2)
                 if r.status_code == 200:
+                    llama_ready = True
                     log.info(f"llama-server ready on port {LLAMA_SERVER_PORT}")
                     return True
             except requests.ConnectionError:
@@ -347,7 +352,8 @@ def start_llama_server(model_key):
 
 
 def stop_llama_server():
-    global llama_process, active_model
+    global llama_process, active_model, llama_ready
+    llama_ready = False
     if llama_process:
         pid = llama_process.pid
         log.info(f"Stopping llama-server (PID {pid})...")
@@ -407,6 +413,7 @@ def api_status():
         "models": get_installed_models(),
         "active_model": active_model,
         "llama_running": is_llama_running(),
+        "llama_ready": llama_ready and is_llama_running(),
         "downloads": download_progress,
         "platform": "cpu",
     })
@@ -657,6 +664,18 @@ def extract_bundled_model():
 
 
 if __name__ == "__main__":
+    # Single-instance guard: if another copy already holds APP_PORT, exit
+    # quietly instead of fighting over the port. Prevents the "double-click →
+    # two windows, one broken" glitch when the slow-starting EXE is launched twice.
+    import socket as _sock
+    _probe = _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM)
+    try:
+        _probe.bind(("127.0.0.1", APP_PORT))
+        _probe.close()
+    except OSError:
+        log.info(f"Another instance already running on port {APP_PORT}; exiting.")
+        sys.exit(0)
+
     MODELS_DIR.mkdir(exist_ok=True)
     if not getattr(sys, "frozen", False):
         BIN_DIR.mkdir(exist_ok=True)

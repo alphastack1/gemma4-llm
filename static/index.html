@@ -908,7 +908,19 @@ function saveChatList() {
 
 function saveCurrentChat() {
   if (!state.chatId || state.messages.length === 0) return;
-  localStorage.setItem(STORAGE_KEY + '_' + state.chatId, JSON.stringify(state.messages));
+  // Don't persist base64 image data — full-res images blow past localStorage's
+  // ~5MB quota, and the resulting throw used to break "New chat". Images stay
+  // in memory for the live session; they just don't survive a reload.
+  const slim = state.messages.map(m => {
+    if (!m.image) return m;
+    const { image, ...rest } = m;
+    return { ...rest, content: rest.content === '(image)' ? '🖼️ image' : rest.content };
+  });
+  try {
+    localStorage.setItem(STORAGE_KEY + '_' + state.chatId, JSON.stringify(slim));
+  } catch (e) {
+    console.warn('Could not save chat history:', e);
+  }
   // Update title from first user message
   const entry = state.chatList.find(c => c.id === state.chatId);
   if (entry && entry.title === 'New chat') {
@@ -984,6 +996,7 @@ async function pollStatus() {
     state.models = d.models;
     state.activeModel = d.active_model;
     state.llamaRunning = d.llama_running;
+    state.llamaReady = d.llama_ready;
     state.downloads = d.downloads || {};
 
     updateSetupUI(d);
@@ -1004,10 +1017,14 @@ async function pollStatus() {
 
 function updateHeader() {
   const el = document.getElementById('header-model');
-  if (state.activeModel && state.llamaRunning) {
+  const ready = IS_APK ? state.llamaRunning : state.llamaReady;
+  if (state.activeModel && ready) {
     const m = state.models[state.activeModel];
     el.textContent = m ? m.name : state.activeModel;
     el.className = 'model-label';
+  } else if (state.activeModel && state.llamaRunning) {
+    el.textContent = 'loading model…';
+    el.className = 'model-label offline';
   } else {
     el.textContent = 'offline';
     el.className = 'model-label offline';
@@ -1037,11 +1054,24 @@ function updateSetupUI(d) {
     return;
   }
 
-  // If model is running, show chat
+  // If model is running, show chat. Gate sending on readiness — the model
+  // takes ~30-60s to load and chat 503s until /health is green.
   if (state.llamaRunning && state.activeModel) {
     setupScreen.classList.remove('visible');
     chatScreen.classList.add('visible');
-    document.getElementById('btn-send').disabled = false;
+    document.getElementById('btn-send').disabled = !state.llamaReady;
+    const welcome = document.getElementById('welcome');
+    const wh3 = welcome && welcome.querySelector('h3');
+    const wp = welcome && welcome.querySelector('p');
+    if (wh3 && wp && state.messages.length === 0) {
+      if (!state.llamaReady) {
+        wh3.textContent = 'Loading model…';
+        wp.textContent = 'Large models take ~30–60s on first load. One moment.';
+      } else {
+        wh3.textContent = "What's on your mind?";
+        wp.textContent = 'Running 100% on your device. Text + images. Private. No cloud.';
+      }
+    }
     return;
   }
 
@@ -1363,6 +1393,11 @@ function addMessage(role, content, image) {
 function handleImageSelect(event) {
   const file = event.target.files[0];
   if (!file) return;
+  if (!file.type.startsWith('image/')) {
+    alert('Only images are supported (PNG, JPG, WebP, GIF).\n\nGemma 4 understands images — not PDFs, documents, or text files.');
+    event.target.value = '';
+    return;
+  }
   const reader = new FileReader();
   reader.onload = (e) => {
     state.pendingImage = e.target.result;
@@ -1482,6 +1517,8 @@ async function sendMessage() {
   const input = document.getElementById('msg-input');
   const text = input.value.trim();
   if ((!text && !state.pendingImage) || state.streaming) return;
+  // Don't send until the model is fully loaded (desktop) — avoids the 503.
+  if (!IS_APK && state.llamaRunning && !state.llamaReady) return;
 
   const attachedImage = state.pendingImage;
   input.value = '';
@@ -1595,6 +1632,8 @@ async function sendMessage() {
   } catch(e) {
     if (e.name === 'AbortError') {
       fullResponse += ' [stopped]';
+    } else if (/503|Service Unavailable|not responding|No model loaded/i.test(e.message || '')) {
+      fullResponse = '⏳ The model is still loading — give it a few seconds, then try again.';
     } else {
       fullResponse = 'Error: ' + e.message;
     }
