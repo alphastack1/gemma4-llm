@@ -22,8 +22,14 @@ SRC_BIN = ROOT / "bin"
 DST_BIN = ROOT / "bin_exe"
 
 # Explicit list: core DLLs + executables
+# NOTE: as of llama.cpp b9512 the server is a thin launcher (llama-server.exe)
+# that loads llama-server-impl.dll, which in turn needs llama-common.dll. Both
+# MUST be bundled or the server starts but immediately fails ("Failed to start
+# llama-server"). Older builds (b8683) had a self-contained llama-server.exe.
 REQUIRED_FILES = [
     "llama-server.exe",
+    "llama-server-impl.dll",
+    "llama-common.dll",
     "llama.dll",
     "ggml.dll",
     "ggml-base.dll",
