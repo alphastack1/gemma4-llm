@@ -1,8 +1,13 @@
 # Gemma4 LLM
 
-A fully offline AI chat app powered by Google's **Gemma 4 E2B** (5.1B params, 2.3B active) with native multimodal vision. No cloud, no API keys, no accounts.
+A fully offline AI chat app powered by Google's **Gemma 4** with native multimodal vision. No cloud, no API keys, no accounts.
 
-Gemma 4 E2B is natively multimodal -- it understands both text and images out of the box.
+Ships with **Gemma 4 E2B** (5.1B params, 2.3B active) bundled, so it works the moment you open it. The new **Gemma 4 12B** dense model (Unsloth Dynamic 4-bit) can be downloaded from inside the app for higher quality. Gemma 4 is natively multimodal — it understands both text and images.
+
+**Recent additions:**
+- 🧵 **Automatic CPU-thread detection** (`cores-2`) instead of a hardcoded count — faster out of the box on both desktop and Android
+- 🎛️ **Settings panel** — tune sampling (temperature, top-p, top-k, repeat penalty, max tokens) live, and engine params (threads, context size) with a reload
+- ⬇️ **In-app model downloads** — grab Gemma 4 12B / E4B from the Models tab without leaving the app
 
 ## Pre-built downloads
 
@@ -11,7 +16,7 @@ If you just want to use the app, grab the pre-built binaries from HuggingFace:
 | Platform | File | Size |
 |----------|------|------|
 | **Windows** | [Gemma4-LLM.zip](https://huggingface.co/alphastack1/gemma4-llm/resolve/main/Gemma4-LLM.zip) | 5.05 GB |
-| **Android** | [gemma4-llm.apk](https://huggingface.co/alphastack1/gemma4-llm/resolve/main/gemma4-llm.apk) | 4.1 GB |
+| **Android** | [gemma4-llm.apk](https://huggingface.co/alphastack1/gemma4-llm/resolve/main/gemma4-llm.apk) | 3.9 GB |
 
 Everything is bundled -- model, inference engine, and UI. Nothing else to install.
 
@@ -138,12 +143,15 @@ gemma4-llm/
         res/                # Icons, strings, styles
 ```
 
-## Model
+## Models
 
-- **Gemma 4 E2B** by Google -- Mixture-of-Experts, 5.1B total parameters, 2.3B active
-- Quantization: Q4_K_M (GGUF) from [unsloth](https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF)
-- Image encoder: mmproj-F16.gguf -- part of Gemma 4's native vision architecture
-- License: Apache 2.0
+| Model | Params | Quant | Notes |
+|-------|--------|-------|-------|
+| **Gemma 4 E2B** | 5.1B (2.3B active) | Q4_K_M | Bundled — runs out of the box, phone-friendly |
+| **Gemma 4 12B** | 12B dense | UD-Q4_K_XL | Best quality; download from the Models tab (desktop / high-RAM) |
+
+- Image encoder: `mmproj-F16.gguf` — part of Gemma 4's native vision architecture
+- GGUFs from [unsloth](https://huggingface.co/unsloth) (Dynamic 2.0 quants); License: Apache 2.0
 
 ## Credits
 
