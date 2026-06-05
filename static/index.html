@@ -275,6 +275,29 @@
 
     .mp-body { flex: 1; overflow-y: auto; padding: 16px 18px; }
 
+    /* ── Settings panel ──────────────────────────────────────────────── */
+    .settings-section { margin-bottom: 24px; }
+    .settings-section h3 { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px 0; }
+    .settings-row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+    .settings-row-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .settings-label { font-size: 0.85rem; color: var(--text); }
+    .settings-value { font-family: "JetBrains Mono", monospace; font-size: 0.78rem; color: var(--text2);
+      background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-xs);
+      padding: 2px 8px; min-width: 48px; text-align: center; }
+    .settings-hint { font-size: 0.7rem; color: var(--muted); line-height: 1.4; }
+    .settings-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 4px;
+      background: var(--surface2); border-radius: 2px; outline: none; }
+    .settings-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
+      background: var(--accent); border-radius: 50%; cursor: pointer; border: 2px solid var(--bg); }
+    .settings-actions { display: flex; gap: 8px; margin-top: 16px; }
+    .settings-btn { flex: 1; padding: 10px 14px; background: var(--surface2); color: var(--text);
+      border: 1px solid var(--border2); border-radius: var(--radius-xs); font-family: inherit;
+      font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+    .settings-btn:hover { background: var(--border); }
+    .settings-btn.primary { background: var(--accent); color: #052e16; border-color: var(--accent); }
+    .settings-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
     .model-card {
       background: var(--surface);
       border: 1px solid var(--border2);
@@ -828,12 +851,14 @@
     <div class="mp-header">
       <button class="mp-tab active" id="tab-chats" onclick="showPanelTab('chats')">Chats</button>
       <button class="mp-tab" id="tab-models" onclick="showPanelTab('models')">Models</button>
+      <button class="mp-tab" id="tab-settings" onclick="showPanelTab('settings')">Settings</button>
       <button class="icon-btn" onclick="closeModels()" style="margin-left:auto">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="mp-body" id="chats-list"></div>
     <div class="mp-body hidden" id="models-list"></div>
+    <div class="mp-body hidden" id="settings-list"></div>
   </div>
 </div>
 
@@ -852,6 +877,21 @@ let state = {
   chatList: [],       // [{id, title, date}]
   pendingImage: null, // base64 data URL of attached image
 };
+
+// ── Settings (localStorage) ──────────────────────────────────────────
+// Sampling params apply per chat request. Engine params (threads, ctx_size)
+// require a llama-server reload — handled by the Apply button.
+const SETTINGS_KEY = 'gemma4_settings';
+const SETTINGS_DEFAULTS = {
+  temperature: 0.7, top_p: 0.95, top_k: 40, max_tokens: 4096, repeat_penalty: 1.1,
+  threads: 0, ctx_size: 8192,   // 0 threads = server auto-detect
+};
+function loadSettings() {
+  try { return { ...SETTINGS_DEFAULTS, ...JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') }; }
+  catch (e) { return { ...SETTINGS_DEFAULTS }; }
+}
+function saveSettings() { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); }
+let settings = loadSettings();
 
 // ── Chat history (localStorage) ──────────────────────────────────────
 const STORAGE_KEY = 'gemma4_chats';
@@ -1486,8 +1526,11 @@ async function sendMessage() {
       body: JSON.stringify({
         model: 'gemma4',
         messages: apiMessages,
-        temperature: 0.7,
-        max_tokens: 8192,
+        temperature: settings.temperature,
+        top_p: settings.top_p,
+        top_k: settings.top_k,
+        max_tokens: settings.max_tokens,
+        repeat_penalty: settings.repeat_penalty,
         stream: true,
       }),
       signal: state.abortController.signal,
@@ -1796,8 +1839,11 @@ function autoResize() {
 function showPanelTab(tab) {
   document.getElementById('tab-chats').classList.toggle('active', tab === 'chats');
   document.getElementById('tab-models').classList.toggle('active', tab === 'models');
+  document.getElementById('tab-settings').classList.toggle('active', tab === 'settings');
   document.getElementById('chats-list').classList.toggle('hidden', tab !== 'chats');
   document.getElementById('models-list').classList.toggle('hidden', tab !== 'models');
+  document.getElementById('settings-list').classList.toggle('hidden', tab !== 'settings');
+  if (tab === 'settings') renderSettings();
 }
 
 function renderChatList() {
@@ -1823,6 +1869,124 @@ function renderChatList() {
     </div>`;
   }
   el.innerHTML = html;
+}
+
+// ── Settings panel ───────────────────────────────────────────────────
+async function fetchEngineInfo() {
+  // { threads, ctx_size, auto_threads, cpu_cores } from backend / native bridge
+  try {
+    if (IS_APK && window.GemmaNative && GemmaNative.getEngineSettings) {
+      return JSON.parse(GemmaNative.getEngineSettings());
+    }
+    const r = await fetch(`${API}/api/settings`);
+    if (r.ok) return await r.json();
+  } catch (e) { /* fall through */ }
+  return { auto_threads: 4, cpu_cores: 4, threads: 0, ctx_size: settings.ctx_size };
+}
+
+let engineInfo = { auto_threads: 4, cpu_cores: 4 };
+
+async function renderSettings() {
+  const el = document.getElementById('settings-list');
+  if (!el) return;
+  engineInfo = await fetchEngineInfo();
+  const threadsLabel = settings.threads === 0 ? `Auto (${engineInfo.auto_threads})` : String(settings.threads);
+  const maxThreads = Math.max(engineInfo.cpu_cores || 8, 8);
+
+  el.innerHTML = `
+    <div class="settings-section">
+      <h3>Sampling</h3>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">Temperature</span><span class="settings-value" id="val-temp">${settings.temperature.toFixed(2)}</span></div>
+        <input class="settings-slider" type="range" id="in-temp" min="0" max="2" step="0.05" value="${settings.temperature}">
+        <div class="settings-hint">Lower = focused, higher = creative</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">Top P</span><span class="settings-value" id="val-topp">${settings.top_p.toFixed(2)}</span></div>
+        <input class="settings-slider" type="range" id="in-topp" min="0.05" max="1" step="0.05" value="${settings.top_p}">
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">Top K</span><span class="settings-value" id="val-topk">${settings.top_k}</span></div>
+        <input class="settings-slider" type="range" id="in-topk" min="1" max="100" step="1" value="${settings.top_k}">
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">Repeat penalty</span><span class="settings-value" id="val-rep">${settings.repeat_penalty.toFixed(2)}</span></div>
+        <input class="settings-slider" type="range" id="in-rep" min="1" max="1.5" step="0.01" value="${settings.repeat_penalty}">
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">Max tokens</span><span class="settings-value" id="val-max">${settings.max_tokens}</span></div>
+        <input class="settings-slider" type="range" id="in-max" min="256" max="8192" step="256" value="${settings.max_tokens}">
+      </div>
+    </div>
+    <div class="settings-section">
+      <h3>Engine <span style="color:var(--muted);font-weight:500;text-transform:none;letter-spacing:0">(reloads model)</span></h3>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">CPU threads</span><span class="settings-value" id="val-threads">${threadsLabel}</span></div>
+        <input class="settings-slider" type="range" id="in-threads" min="0" max="${maxThreads}" step="1" value="${settings.threads}">
+        <div class="settings-hint">0 = auto. Device has ${engineInfo.cpu_cores} cores. More threads ≠ faster — past the big-core count, memory bandwidth caps throughput.</div>
+      </div>
+      <div class="settings-row">
+        <div class="settings-row-head"><span class="settings-label">Context size</span><span class="settings-value" id="val-ctx">${settings.ctx_size}</span></div>
+        <input class="settings-slider" type="range" id="in-ctx" min="512" max="16384" step="512" value="${settings.ctx_size}">
+        <div class="settings-hint">Larger = remembers more, uses more RAM</div>
+      </div>
+      <div class="settings-actions">
+        <button class="settings-btn" id="btn-settings-reset">Reset</button>
+        <button class="settings-btn primary" id="btn-settings-apply">Apply engine</button>
+      </div>
+    </div>`;
+
+  const wireSlider = (id, key, fmt) => {
+    const input = document.getElementById(id);
+    const valEl = document.getElementById('val-' + id.slice(3));
+    input.addEventListener('input', () => {
+      settings[key] = parseFloat(input.value);
+      valEl.textContent = fmt(settings[key]);
+      saveSettings();
+    });
+  };
+  wireSlider('in-temp', 'temperature', v => v.toFixed(2));
+  wireSlider('in-topp', 'top_p', v => v.toFixed(2));
+  wireSlider('in-topk', 'top_k', v => String(v));
+  wireSlider('in-rep', 'repeat_penalty', v => v.toFixed(2));
+  wireSlider('in-max', 'max_tokens', v => String(v));
+
+  const inT = document.getElementById('in-threads');
+  const inC = document.getElementById('in-ctx');
+  inT.addEventListener('input', () => {
+    const v = parseInt(inT.value, 10);
+    settings.threads = v;
+    document.getElementById('val-threads').textContent = v === 0 ? `Auto (${engineInfo.auto_threads})` : String(v);
+  });
+  inC.addEventListener('input', () => {
+    settings.ctx_size = parseInt(inC.value, 10);
+    document.getElementById('val-ctx').textContent = String(settings.ctx_size);
+  });
+
+  document.getElementById('btn-settings-reset').onclick = () => {
+    settings = { ...SETTINGS_DEFAULTS }; saveSettings(); renderSettings();
+  };
+
+  document.getElementById('btn-settings-apply').onclick = async () => {
+    const btn = document.getElementById('btn-settings-apply');
+    btn.disabled = true; btn.textContent = 'Reloading…';
+    saveSettings();
+    try {
+      if (IS_APK && window.GemmaNative && GemmaNative.applyEngineSettings) {
+        GemmaNative.applyEngineSettings(settings.threads, settings.ctx_size);
+      } else {
+        await fetch(`${API}/api/reload`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ threads: settings.threads, ctx_size: settings.ctx_size }),
+        });
+      }
+      btn.textContent = 'Applied ✓';
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'Apply engine'; }, 1500);
+    } catch (e) {
+      btn.textContent = 'Failed';
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'Apply engine'; }, 2000);
+    }
+  };
 }
 
 // ── Button handlers ──────────────────────────────────────────────────

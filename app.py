@@ -42,10 +42,35 @@ else:
 
 LLAMA_SERVER_PORT = 8080
 APP_PORT = 7860
-LLAMA_THREADS = 4
+
+# Auto-detect thread count. CPU inference scales roughly linearly until memory
+# bandwidth saturates (~physical-core count), so default to cores-2 with a
+# floor of 4. User can override via the Settings panel (/api/reload).
+def _auto_threads():
+    n = os.cpu_count() or 4
+    return max(4, n - 2)
+
+# Current engine settings (mutable — updated by /api/reload)
+engine_settings = {
+    "threads": _auto_threads(),
+    "ctx_size": 8192,
+}
 
 # Gemma 4 models — standard quantizations, stock llama.cpp
 MODELS = {
+    "12B": {
+        "name": "Gemma 4 12B",
+        "file": "gemma-4-12b-it-UD-Q4_K_XL.gguf",
+        # Distinct local name — the 12B vision projector differs from E2B's,
+        # which also ships as "mmproj-F16.gguf" upstream (avoid a filename clash).
+        "mmproj": "mmproj-12b-F16.gguf",
+        "url": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/gemma-4-12b-it-UD-Q4_K_XL.gguf",
+        "mmproj_url": "https://huggingface.co/unsloth/gemma-4-12b-it-GGUF/resolve/main/mmproj-F16.gguf",
+        "size_mb": 7025,
+        "mmproj_size_mb": 116,
+        "description": "12B dense, full multimodal. Best quality. GPU or strong CPU recommended.",
+        "bundled": False,
+    },
     "E2B": {
         "name": "Gemma 4 E2B",
         "file": "gemma-4-E2B-it-Q4_K_M.gguf",
@@ -255,9 +280,9 @@ def start_llama_server(model_key):
         "-m", str(model_path),
         "--host", "127.0.0.1",
         "--port", str(LLAMA_SERVER_PORT),
-        "-c", "8192",                    # Context length (reasonable default)
-        "-ngl", "99",                    # Offload all layers to GPU
-        "-t", str(LLAMA_THREADS),
+        "-c", str(engine_settings["ctx_size"]),   # Context length
+        "-ngl", "99",                              # Offload all layers to GPU
+        "-t", str(engine_settings["threads"]),     # Auto-detected (cores-2), user-overridable
         "--no-webui",
     ]
 
@@ -501,6 +526,40 @@ def api_unload_model():
     return jsonify({"ok": True})
 
 
+@app.route("/api/settings", methods=["GET"])
+def api_get_settings():
+    """Current engine params + auto-detected reference values."""
+    return jsonify({
+        "threads": engine_settings["threads"],
+        "ctx_size": engine_settings["ctx_size"],
+        "auto_threads": _auto_threads(),
+        "cpu_cores": os.cpu_count() or 0,
+    })
+
+
+@app.route("/api/reload", methods=["POST"])
+def api_reload():
+    """Apply new engine params (threads, ctx_size) and restart llama-server.
+    threads=0 means 'use auto-detected value'."""
+    data = request.get_json() or {}
+
+    if "threads" in data:
+        t = int(data["threads"])
+        engine_settings["threads"] = _auto_threads() if t <= 0 else t
+    if "ctx_size" in data:
+        engine_settings["ctx_size"] = max(512, int(data["ctx_size"]))
+
+    if active_model:
+        model_to_reload = active_model
+        stop_llama_server()
+        success = start_llama_server(model_to_reload)
+        return jsonify({"ok": success, "settings": {
+            "threads": engine_settings["threads"], "ctx_size": engine_settings["ctx_size"]}})
+
+    return jsonify({"ok": True, "settings": {
+        "threads": engine_settings["threads"], "ctx_size": engine_settings["ctx_size"]}})
+
+
 # ---------------------------------------------------------------------------
 # Routes - Chat (proxy to llama-server)
 # ---------------------------------------------------------------------------
@@ -611,14 +670,17 @@ if __name__ == "__main__":
 
         threading.Thread(target=run_flask, daemon=True).start()
 
-        # Only auto-start model if already downloaded (models not bundled in EXE)
-        e2b = MODELS["E2B"]
-        if (MODELS_DIR / e2b["file"]).exists() and (MODELS_DIR / e2b["mmproj"]).exists():
-            threading.Thread(
-                target=lambda: start_llama_server("E2B"), daemon=True
-            ).start()
+        # Auto-start the best model already on disk: prefer 12B, fall back to the
+        # bundled E2B. 12B isn't bundled (7 GB) — it's the headline download.
+        for _key in ["12B", "E2B"]:
+            _info = MODELS[_key]
+            if (MODELS_DIR / _info["file"]).exists() and (MODELS_DIR / _info["mmproj"]).exists():
+                threading.Thread(
+                    target=lambda k=_key: start_llama_server(k), daemon=True
+                ).start()
+                break
         else:
-            log.info("Model not found — setup UI will handle download.")
+            log.info("No model downloaded — setup UI will handle download.")
 
         for _ in range(50):
             try:

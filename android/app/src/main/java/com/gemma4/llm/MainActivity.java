@@ -5,6 +5,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
@@ -12,6 +13,7 @@ import android.os.IBinder;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
+import android.webkit.JavascriptInterface;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
@@ -33,6 +35,9 @@ import java.io.InputStream;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "Gemma4LLM";
     private static final int LLAMA_PORT = 8080;
+    private static final String PREFS = "gemma4_settings";
+    private static final String PREF_THREADS = "threads";
+    private static final String PREF_CTX = "ctx_size";
 
     // Model files bundled in assets/
     // The main model is split into ~1 GB chunks (Android build tools can't handle >2 GB assets)
@@ -111,6 +116,9 @@ public class MainActivity extends AppCompatActivity {
         webView.setWebChromeClient(new WebChromeClient());
         webView.setWebViewClient(new WebViewClient());
 
+        // Engine-settings bridge (threads/ctx) for the Settings panel on APK.
+        webView.addJavascriptInterface(new EngineBridge(), "GemmaNative");
+
         webView.loadUrl("file:///android_asset/index.html?apk=1&port=" + LLAMA_PORT);
     }
 
@@ -180,6 +188,8 @@ public class MainActivity extends AppCompatActivity {
         intent.putExtra("model_path", new File(modelsDir, MODEL_FILE).getAbsolutePath());
         intent.putExtra("mmproj_path", new File(modelsDir, MMPROJ_FILE).getAbsolutePath());
         intent.putExtra("port", LLAMA_PORT);
+        intent.putExtra("threads", prefs().getInt(PREF_THREADS, 0));
+        intent.putExtra("ctx_size", prefs().getInt(PREF_CTX, 4096));
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
@@ -204,6 +214,39 @@ public class MainActivity extends AppCompatActivity {
             llamaService = null;
         }
     };
+
+    private SharedPreferences prefs() {
+        return getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+    }
+
+    /**
+     * JS bridge exposed to the WebView as window.GemmaNative. Lets the Settings
+     * panel read auto-detected thread info and apply engine overrides (threads,
+     * context size), which restart llama-server with the new params.
+     */
+    public class EngineBridge {
+        @JavascriptInterface
+        public String getEngineSettings() {
+            int auto = (serviceBound && llamaService != null)
+                    ? llamaService.getAutoThreads()
+                    : Math.min(Math.max(4, Runtime.getRuntime().availableProcessors() - 2), 6);
+            int cores = Runtime.getRuntime().availableProcessors();
+            return "{\"threads\":" + prefs().getInt(PREF_THREADS, 0)
+                 + ",\"ctx_size\":" + prefs().getInt(PREF_CTX, 4096)
+                 + ",\"auto_threads\":" + auto
+                 + ",\"cpu_cores\":" + cores + "}";
+        }
+
+        @JavascriptInterface
+        public void applyEngineSettings(int threads, int ctxSize) {
+            if (threads < 0) threads = 0;
+            if (ctxSize < 512) ctxSize = 512;
+            prefs().edit().putInt(PREF_THREADS, threads).putInt(PREF_CTX, ctxSize).apply();
+            if (serviceBound && llamaService != null) {
+                llamaService.reloadWithParams(threads, ctxSize);
+            }
+        }
+    }
 
     @Override
     public void onBackPressed() {

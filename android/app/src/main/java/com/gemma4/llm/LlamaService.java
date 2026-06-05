@@ -25,11 +25,24 @@ public class LlamaService extends Service {
     private static final int NOTIFICATION_ID = 1;
 
     private final IBinder binder = new LocalBinder();
-    private Process llamaProcess;
-    private String modelPath;
-    private String mmprojPath;
+    private volatile Process llamaProcess;
+    private volatile String modelPath;
+    private volatile String mmprojPath;
     private int port = 8080;
-    private boolean isReady = false;
+    private volatile int threads = 0;     // 0 = auto-detect
+    private volatile int ctxSize = 4096;
+    private volatile boolean isReady = false;
+
+    /**
+     * Pick a thread count that maximizes tokens/sec on phones. Using ALL cores
+     * hurts throughput on big.LITTLE (little cores stall the big ones at sync
+     * points; memory bandwidth saturates past ~6). Heuristic: cores-2, clamped
+     * to [4, 6] — approximates "big cores only" on modern 8-core phones.
+     */
+    private int autoThreadCount() {
+        int cores = Runtime.getRuntime().availableProcessors();
+        return Math.min(Math.max(4, cores - 2), 6);
+    }
 
     public class LocalBinder extends Binder {
         LlamaService getService() {
@@ -54,6 +67,8 @@ public class LlamaService extends Service {
             modelPath = intent.getStringExtra("model_path");
             mmprojPath = intent.getStringExtra("mmproj_path");
             port = intent.getIntExtra("port", 8080);
+            threads = intent.getIntExtra("threads", 0);
+            ctxSize = intent.getIntExtra("ctx_size", 4096);
         }
 
         startForeground(NOTIFICATION_ID, buildNotification("Starting..."));
@@ -78,14 +93,18 @@ public class LlamaService extends Service {
             return;
         }
 
+        int effectiveThreads = threads > 0 ? threads : autoThreadCount();
+        Log.i(TAG, "Threads: " + effectiveThreads + " (cores="
+                + Runtime.getRuntime().availableProcessors() + ", override=" + threads + ")");
+
         try {
             ProcessBuilder pb = new ProcessBuilder(
                 serverBinary,
                 "-m", modelPath,
                 "--host", "127.0.0.1",
                 "--port", String.valueOf(port),
-                "-c", "4096",                // Context (reduced for mobile RAM)
-                "-t", "4",                   // 4 threads (big cores)
+                "-c", String.valueOf(ctxSize),
+                "-t", String.valueOf(effectiveThreads),
                 "--no-webui",
                 "--cache-type-k", "q8_0",
                 "--cache-type-v", "q8_0"
@@ -170,6 +189,29 @@ public class LlamaService extends Service {
 
     public boolean isReady() {
         return isReady;
+    }
+
+    public int getThreads()     { return threads > 0 ? threads : autoThreadCount(); }
+    public int getCtxSize()     { return ctxSize; }
+    public int getAutoThreads() { return autoThreadCount(); }
+    public int getCpuCores()    { return Runtime.getRuntime().availableProcessors(); }
+
+    /** Restart llama-server with new engine params. Safe to call from any thread. */
+    public void reloadWithParams(int newThreads, int newCtx) {
+        if (newThreads >= 0) this.threads = newThreads;
+        if (newCtx > 0) this.ctxSize = newCtx;
+        isReady = false;
+        updateNotification("Applying settings...");
+        if (llamaProcess != null) {
+            llamaProcess.destroy();
+            try {
+                llamaProcess.waitFor();
+            } catch (InterruptedException e) {
+                llamaProcess.destroyForcibly();
+            }
+            llamaProcess = null;
+        }
+        new Thread(this::startLlamaServer).start();
     }
 
     private void createNotificationChannel() {
