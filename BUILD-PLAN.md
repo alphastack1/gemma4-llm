@@ -3,7 +3,7 @@
 > **Download ready-made builds:**
 > - [**Windows**](https://huggingface.co/alphastack1/gemma4-llm/resolve/main/Gemma4-LLM.zip) (5.05 GB zip — extract, run EXE)
 > - [**Android APK**](https://huggingface.co/alphastack1/gemma4-llm/resolve/main/gemma4-llm.apk) (3.9 GB)
-> - [Release page](https://github.com/alphastack1/storage/releases/tag/gemma4-llm-v1.0.0)
+> - [Release page](https://github.com/alphastack1/storage/releases/tag/gemma4-llm-v1.1.0)
 >
 > **Or build from source:** Drop this file into an empty folder, open it in
 > Claude Code, and say *"Read this file and build everything."*
