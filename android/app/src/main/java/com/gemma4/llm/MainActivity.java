@@ -22,9 +22,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
-import androidx.activity.result.ActivityResult;
-import androidx.activity.result.ActivityResultLauncher;
-import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -59,20 +56,7 @@ public class MainActivity extends AppCompatActivity {
     private LlamaService llamaService;
     private boolean serviceBound = false;
     private ValueCallback<Uri[]> filePathCallback;
-
-    // Routes the system file-picker result back to the WebView's <input type=file>.
-    private final ActivityResultLauncher<Intent> fileChooserLauncher =
-            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
-                    (ActivityResult result) -> {
-                        if (filePathCallback == null) return;
-                        Uri[] uris = null;
-                        if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null
-                                && result.getData().getDataString() != null) {
-                            uris = new Uri[]{ Uri.parse(result.getData().getDataString()) };
-                        }
-                        filePathCallback.onReceiveValue(uris);
-                        filePathCallback = null;
-                    });
+    private static final int FILE_CHOOSER_REQUEST = 1001;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -143,7 +127,7 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     Intent intent = params.createIntent();
                     intent.setType("image/*");
-                    fileChooserLauncher.launch(intent);
+                    startActivityForResult(intent, FILE_CHOOSER_REQUEST);
                 } catch (Exception e) {
                     Log.e(TAG, "File chooser failed", e);
                     filePathCallback = null;
@@ -283,6 +267,19 @@ public class MainActivity extends AppCompatActivity {
             if (serviceBound && llamaService != null) {
                 llamaService.reloadWithParams(threads, ctxSize);
             }
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == FILE_CHOOSER_REQUEST && filePathCallback != null) {
+            Uri[] uris = null;
+            if (resultCode == Activity.RESULT_OK && data != null && data.getDataString() != null) {
+                uris = new Uri[]{ Uri.parse(data.getDataString()) };
+            }
+            filePathCallback.onReceiveValue(uris);
+            filePathCallback = null;
         }
     }
 
