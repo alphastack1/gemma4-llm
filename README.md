@@ -24,7 +24,7 @@ Everything is bundled -- model, inference engine, and UI. Nothing else to instal
 
 ## Building from source
 
-This repo contains everything needed to reproduce both builds. The app uses stock [llama.cpp](https://github.com/ggml-org/llama.cpp) (release b8683) as the inference backend.
+This repo contains everything needed to reproduce both builds. The app uses stock [llama.cpp](https://github.com/ggml-org/llama.cpp) (release b9512) as the inference backend — this release adds support for the Gemma 4 12B "unified" multimodal architecture.
 
 ### Prerequisites
 
@@ -93,7 +93,7 @@ cp /path/to/mmproj-F16.gguf .
 
 # 2. Clone llama.cpp into the NDK build directory
 cd ../cpp/
-git clone --depth 1 --branch b8683 https://github.com/ggml-org/llama.cpp.git
+git clone --depth 1 --branch b9512 https://github.com/ggml-org/llama.cpp.git
 
 # 3. Build the APK
 cd ../../../../   # back to android/

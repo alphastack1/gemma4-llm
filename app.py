@@ -107,7 +107,10 @@ MODELS = {
 }
 
 # Stock llama.cpp — no special fork needed for Gemma 4.
-BINARY_RELEASE_TAG = "b8683"
+# b9512: first releases with full Gemma 4 12B "unified" multimodal support
+# (unified-vision + FPE fixes landed in b9494–b9496; Unsloth built the 12B
+# GGUFs with b9512). The older b8683 loads E2B/E4B but NOT the 12B arch.
+BINARY_RELEASE_TAG = "b9512"
 BINARY_BASE = f"https://github.com/ggml-org/llama.cpp/releases/download/{BINARY_RELEASE_TAG}"
 
 # Auto-detect CUDA version from driver
@@ -119,7 +122,7 @@ def _detect_cuda_tag():
         )
         if r.returncode == 0:
             major = int(r.stdout.strip().split("\n")[0].split(".")[0])
-            return "13.1" if major >= 560 else "12.4"
+            return "13.3" if major >= 560 else "12.4"
     except Exception:
         pass
     return "12.4"
