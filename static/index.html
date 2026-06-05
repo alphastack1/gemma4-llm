@@ -1292,6 +1292,9 @@ let loadingModel = null;  // key of model currently being loaded
 function renderModelsPanel() {
   const list = document.getElementById('models-list');
   let html = '';
+  if (IS_APK) {
+    html += `<div style="font-size:0.78rem;line-height:1.5;color:#fde68a;background:rgba(234,179,8,0.08);border:1px solid rgba(234,179,8,0.25);border-radius:10px;padding:11px 13px;margin-bottom:14px">📱 On phones, Gemma&nbsp;4 runs the small <b>E2B</b> model bundled in the app. The larger <b>E4B</b> and <b>12B</b> models are far too slow for a phone — run those in the <b>desktop app</b>.</div>`;
+  }
   for (const [key, m] of Object.entries(state.models)) {
     const isActive = key === state.activeModel && state.llamaRunning;
     const isInstalled = m.installed;

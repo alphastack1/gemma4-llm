@@ -1,12 +1,14 @@
 package com.gemma4.llm;
 
 import android.Manifest;
+import android.app.Activity;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
@@ -14,11 +16,15 @@ import android.util.Log;
 import android.view.View;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
+import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import androidx.activity.result.ActivityResult;
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -52,6 +58,21 @@ public class MainActivity extends AppCompatActivity {
     private WebView webView;
     private LlamaService llamaService;
     private boolean serviceBound = false;
+    private ValueCallback<Uri[]> filePathCallback;
+
+    // Routes the system file-picker result back to the WebView's <input type=file>.
+    private final ActivityResultLauncher<Intent> fileChooserLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(),
+                    (ActivityResult result) -> {
+                        if (filePathCallback == null) return;
+                        Uri[] uris = null;
+                        if (result.getResultCode() == Activity.RESULT_OK && result.getData() != null
+                                && result.getData().getDataString() != null) {
+                            uris = new Uri[]{ Uri.parse(result.getData().getDataString()) };
+                        }
+                        filePathCallback.onReceiveValue(uris);
+                        filePathCallback = null;
+                    });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -113,7 +134,24 @@ public class MainActivity extends AppCompatActivity {
 
         webView.setBackgroundColor(0xFF09090B);
         webView.setClipToPadding(false);
-        webView.setWebChromeClient(new WebChromeClient());
+        webView.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public boolean onShowFileChooser(WebView view, ValueCallback<Uri[]> callback,
+                                             FileChooserParams params) {
+                if (filePathCallback != null) filePathCallback.onReceiveValue(null);
+                filePathCallback = callback;
+                try {
+                    Intent intent = params.createIntent();
+                    intent.setType("image/*");
+                    fileChooserLauncher.launch(intent);
+                } catch (Exception e) {
+                    Log.e(TAG, "File chooser failed", e);
+                    filePathCallback = null;
+                    return false;
+                }
+                return true;
+            }
+        });
         webView.setWebViewClient(new WebViewClient());
 
         // Engine-settings bridge (threads/ctx) for the Settings panel on APK.
