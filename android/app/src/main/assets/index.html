@@ -298,6 +298,24 @@
     .settings-btn.primary { background: var(--accent); color: #052e16; border-color: var(--accent); }
     .settings-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    /* ── Thinking (reasoning) display ────────────────────────────────── */
+    .msg-thinking-live { background: var(--surface); border: 1px solid var(--border2);
+      border-radius: var(--radius-s); padding: 10px 12px; margin-bottom: 8px; }
+    .msg-thinking-live .mt-head { color: var(--muted); font-size: 0.72rem; font-weight: 600;
+      margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+    .msg-thinking-live .mt-body { white-space: pre-wrap; font-style: italic; font-size: 0.8rem;
+      color: var(--text2); max-height: 160px; overflow-y: auto; line-height: 1.5; }
+    details.msg-thoughts { margin-bottom: 8px; background: var(--surface);
+      border: 1px solid var(--border2); border-radius: var(--radius-s); }
+    details.msg-thoughts summary { cursor: pointer; padding: 8px 12px; font-size: 0.74rem;
+      color: var(--muted); font-weight: 600; user-select: none; list-style: none; }
+    details.msg-thoughts summary::-webkit-details-marker { display: none; }
+    details.msg-thoughts summary::before { content: '▸ '; }
+    details.msg-thoughts[open] summary::before { content: '▾ '; }
+    details.msg-thoughts[open] summary { border-bottom: 1px solid var(--border); }
+    details.msg-thoughts .mt-body { padding: 10px 12px; font-size: 0.78rem; color: var(--text2);
+      font-style: italic; white-space: pre-wrap; line-height: 1.5; max-height: 320px; overflow-y: auto; }
+
     .model-card {
       background: var(--surface);
       border: 1px solid var(--border2);
@@ -1480,12 +1498,15 @@ function renderMessages() {
         </button>
       </div>` : '';
     const meta = msg.meta ? `<div class="tok-speed">${msg.meta}</div>` : '';
+    const thoughtsHtml = (msg.role === 'assistant' && msg.thinking) ? `
+        <details class="msg-thoughts"><summary>Thoughts</summary><div class="mt-body">${escHtml(msg.thinking)}</div></details>` : '';
     html += `
     <div class="msg ${msg.role}">
       <div class="msg-avatar">${avatar}</div>
       <div class="msg-body">
         <div class="msg-role">${label}</div>
         ${imageHtml}
+        ${thoughtsHtml}
         <div class="msg-content">${rendered}</div>
         ${meta}
         ${copyBtn}
@@ -1499,6 +1520,7 @@ function renderMessages() {
       <div class="msg-avatar">G</div>
       <div class="msg-body">
         <div class="msg-role">Gemma4</div>
+        <div class="msg-thinking" id="stream-thinking" style="display:none"></div>
         <div class="msg-content" id="stream-content">
           <div class="typing-indicator">
             <div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div>
@@ -1549,6 +1571,7 @@ async function sendMessage() {
     }
   }
   let fullResponse = '';
+  let thinkingText = '';
   let tokenCount = 0;
   const streamStart = performance.now();
 
@@ -1602,13 +1625,27 @@ async function sendMessage() {
             const content = delta.content;
 
             if (thinking) {
+              thinkingText += thinking;
               tokenCount++;
-              const el = document.getElementById('stream-content');
-              if (el && !fullResponse) {
-                el.innerHTML = '<span style="color:var(--muted);font-style:italic">thinking...</span>';
+              let body = document.getElementById('mt-body');
+              if (!body) {
+                const tel = document.getElementById('stream-thinking');
+                if (tel) {
+                  tel.style.display = '';
+                  tel.className = 'msg-thinking msg-thinking-live';
+                  tel.innerHTML = '<div class="mt-head">💭 Thinking…</div><div class="mt-body" id="mt-body"></div>';
+                  body = document.getElementById('mt-body');
+                }
               }
+              if (body) { body.textContent = thinkingText; body.scrollTop = body.scrollHeight; }
+              document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
             }
             if (content) {
+              // First real answer token: mark the thinking block as done
+              if (!fullResponse && thinkingText) {
+                const head = document.querySelector('#stream-thinking .mt-head');
+                if (head) head.textContent = '💭 Thoughts';
+              }
               fullResponse += content;
               tokenCount++;
               const el = document.getElementById('stream-content');
@@ -1647,6 +1684,7 @@ async function sendMessage() {
     state.messages.push({
       role: 'assistant',
       content: fullResponse,
+      thinking: thinkingText || undefined,
       meta: `${tokenCount} tokens \u00b7 ${tps} tok/s \u00b7 ${elapsed.toFixed(1)}s`,
     });
   }
